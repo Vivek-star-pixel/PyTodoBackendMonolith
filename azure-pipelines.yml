@@ -2,18 +2,33 @@ trigger: none
 
 pool: Default
 
+variables:
+  APP_DIR: '/home/azureuser/todoapi'
+  VENV_DIR: '/home/azureuser/PyTodoBackendMonolith/venv'
+  SERVICE_NAME: 'pytodo'
+
 stages:
+
+# ============================================================
+# BUILD STAGE
+# ============================================================
 - stage: Build
   displayName: Build & Code Quality
+
   jobs:
   - job: BuildPythonApp
     displayName: Build Python Application
+
     steps:
 
+    # Checkout GitHub repository
     - checkout: self
 
+    # --------------------------------------------------------
+    # Python + Ruff
+    # --------------------------------------------------------
     - task: PowerShell@2
-      displayName: Check Python Version & Install Lint Tool
+      displayName: Check Python Version & Install Ruff
       inputs:
         targetType: 'inline'
         script: |
@@ -21,33 +36,145 @@ stages:
           python -m pip install --upgrade pip
           python -m pip install ruff
           python -m ruff --version
-  
 
+    # --------------------------------------------------------
+    # Ruff code quality check
+    # --------------------------------------------------------
     # - task: PowerShell@2
     #   displayName: Run Python Linting (Ruff)
     #   inputs:
     #     targetType: 'inline'
     #     script: |
-    #       python -m ruff check --fix "$(Build.SourcesDirectory)/app.py"
+    #       python -m ruff check "$(Build.SourcesDirectory)/app.py"
 
-    - task: PublishPipelineArtifact@1
-      displayName: Publish Application Artifact
-      inputs:
-        targetPath: '$(Build.SourcesDirectory)/app.py'
-        artifact: 'vivek-todo'
-        publishLocation: 'pipeline'
-
-    - task: DownloadPipelineArtifact@2
-      displayName: Download Application Artifact
-      inputs:
-        buildType: 'current'
-        artifactName: 'vivek-todo'
-        targetPath: '$(Pipeline.Workspace)/vivek-todo'
-
+    # --------------------------------------------------------
+    # Create ZIP
+    # --------------------------------------------------------
     - task: ArchiveFiles@2
+      displayName: Create Application ZIP
       inputs:
-        rootFolderOrFile: '$(Pipeline.Workspace)/vivek-todo'
-        includeRootFolder: true
+        rootFolderOrFile: '$(Build.SourcesDirectory)/app.py'
+        includeRootFolder: false
         archiveType: 'zip'
         archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
         replaceExistingArchive: true
+
+    # --------------------------------------------------------
+    # Publish ZIP Artifact
+    # --------------------------------------------------------
+    - task: PublishPipelineArtifact@1
+      displayName: Publish Application Artifact
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/artifact.zip'
+        artifact: 'todoapi_package'
+        publishLocation: 'pipeline'
+
+
+# ============================================================
+# DEPLOY STAGE
+# ============================================================
+- stage: Deploy
+  displayName: Deploy Application to VM
+
+  dependsOn: Build
+
+  jobs:
+
+  - deployment: deployPy
+
+    displayName: Deploy Python Backend
+
+    environment:
+      name: python
+      resourceType: virtualMachine
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          # --------------------------------------------------
+          # Download artifact on VM
+          # --------------------------------------------------
+          - task: DownloadPipelineArtifact@2
+            displayName: Download Build Artifact
+            inputs:
+              buildType: 'current'
+              artifactName: 'todoapi_package'
+              targetPath: '$(Pipeline.Workspace)/todoapi_package'
+
+
+          # --------------------------------------------------
+          # Deploy application
+          # --------------------------------------------------
+          - task: Bash@3
+            displayName: Stop Service, Deploy Code & Restart
+            inputs:
+              targetType: 'inline'
+              script: |
+
+                echo "================================="
+                echo "     PYTHON BACKEND DEPLOY"
+                echo "================================="
+
+                echo "Stopping service..."
+                sudo systemctl stop $(SERVICE_NAME) || true
+
+
+                echo "Creating application directory..."
+                sudo mkdir -p $(APP_DIR)
+
+
+                echo "Extracting application..."
+                sudo unzip -o \
+                  "$(Pipeline.Workspace)/todoapi_package/artifact.zip" \
+                  -d "$(APP_DIR)"
+
+
+                echo "Setting ownership..."
+                sudo chown -R $(whoami):$(whoami) $(APP_DIR)
+
+
+                echo "Creating systemd service..."
+                sudo tee /etc/systemd/system/$(SERVICE_NAME).service > /dev/null <<EOF
+                [Unit]
+                Description=Todo API Uvicorn App
+                After=network.target
+
+                [Service]
+                User=$(whoami)
+                WorkingDirectory=$(APP_DIR)
+                ExecStart=$(VENV_DIR)/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+                Restart=always
+                RestartSec=5
+
+                [Install]
+                WantedBy=multi-user.target
+                EOF
+
+
+                echo "Reloading systemd..."
+                sudo systemctl daemon-reload
+
+
+                echo "Enabling service..."
+                sudo systemctl enable $(SERVICE_NAME)
+
+
+                echo "Starting service..."
+                sudo systemctl start $(SERVICE_NAME)
+
+
+                echo "Checking service status..."
+                sudo systemctl --no-pager status $(SERVICE_NAME)
+
+
+                echo "Checking application..."
+                curl -f http://localhost:8000/api || exit 1
+
+
+                echo "================================="
+                echo "     DEPLOYMENT SUCCESSFUL"
+                echo "================================="
+
+
