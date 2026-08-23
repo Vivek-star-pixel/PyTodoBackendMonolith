@@ -21,14 +21,17 @@ stages:
         targetType: 'inline'
         script: |
           python --version
-          pip install ruff
+          python -m pip install --upgrade pip
+          python -m pip install ruff
+          python -m ruff --version
 
 
     - task: PowerShell@2
       displayName: Run Python Linting (Ruff)
       inputs:
         targetType: 'inline'
-        script: 'ruff check --fix .'
+        script: |
+          python -m ruff check --fix .
 
 
     - task: PublishPipelineArtifact@1
