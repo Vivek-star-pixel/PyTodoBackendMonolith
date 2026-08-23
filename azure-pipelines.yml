@@ -26,13 +26,12 @@ stages:
           python -m ruff --version
 
 
-    # - task: PowerShell@2
-    #   displayName: Run Python Linting (Ruff)
-    #   inputs:
-    #     targetType: 'inline'
-    #     script: |
-    #       python -m ruff check --fix .
-
+    - task: PowerShell@2
+      displayName: Run Python Linting (Ruff)
+      inputs:
+        targetType: 'inline'
+        script: |
+          python -m ruff check --fix "$(Build.SourcesDirectory)/PyTodoBackendMonolith/app.py"
 
     - task: PublishPipelineArtifact@1
       displayName: Publish Application Artifact
@@ -40,6 +39,25 @@ stages:
         targetPath: '$(System.DefaultWorkingDirectory)/app.py'
         artifact: 'vivek-todo'
         publishLocation: 'pipeline'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: 'vivek-todo'
+        targetPath: '$(Pipeline.Workspace)/vivek-todo'
+
+
+    # - task: ArchiveFiles@2
+    #   inputs:
+    #     rootFolderOrFile: '$(Pipeline.Workspace)/todoapi_artifact'
+    #     includeRootFolder: true
+    #     archiveType: 'zip'
+    #     archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
+    #     replaceExistingArchive: true
+
+
+
+
 
 
 
