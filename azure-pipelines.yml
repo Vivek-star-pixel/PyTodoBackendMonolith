@@ -12,9 +12,11 @@ stages:
   displayName: Build & Code Quality
   jobs:
   - job: BuildPythonApp
-    displayName:  Build Python Application
-    steps:  
-    
+    displayName: Build Python Application
+    steps:
+
+    - checkout: self
+
     - task: PowerShell@2
       displayName: Check Python Version & Install Lint Tool
       inputs:
@@ -24,7 +26,6 @@ stages:
           python -m pip install --upgrade pip
           python -m pip install ruff
           python -m ruff --version
-
 
     - task: PowerShell@2
       displayName: Run Python Linting (Ruff)
