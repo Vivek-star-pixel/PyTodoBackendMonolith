@@ -21,6 +21,7 @@ stages:
           python -m pip install --upgrade pip
           python -m pip install ruff
           python -m ruff --version
+          python -m ruff check --fix "$(Build.SourcesDirectory)/app.py"
 
     # - task: PowerShell@2
     #   displayName: Run Python Linting (Ruff)
