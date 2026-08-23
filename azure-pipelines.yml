@@ -21,11 +21,13 @@ stages:
 
     steps:
 
-    # Checkout GitHub repository
+    # --------------------------------------------------------
+    # 1. Checkout GitHub Repository
+    # --------------------------------------------------------
     - checkout: self
 
     # --------------------------------------------------------
-    # Python + Ruff
+    # 2. Install / Verify Python + Ruff
     # --------------------------------------------------------
     - task: PowerShell@2
       displayName: Check Python Version & Install Ruff
@@ -38,7 +40,9 @@ stages:
           python -m ruff --version
 
     # --------------------------------------------------------
-    # Ruff code quality check
+    # 3. Ruff Linting
+    # --------------------------------------------------------
+    # Enable this after fixing all Ruff issues in app.py
     # --------------------------------------------------------
     # - task: PowerShell@2
     #   displayName: Run Python Linting (Ruff)
@@ -47,27 +51,8 @@ stages:
     #     script: |
     #       python -m ruff check "$(Build.SourcesDirectory)/app.py"
 
-
-
     # --------------------------------------------------------
-    # Publish ZIP Artifact
-    # --------------------------------------------------------
-    - task: PublishPipelineArtifact@1
-      displayName: Publish Application Artifact
-      inputs:
-        targetPath: '$(Build.ArtifactStagingDirectory)/artifact.zip'
-        artifact: 'todoapi_package'
-        publishLocation: 'pipeline'
-
-
-    - task: DownloadPipelineArtifact@2
-      inputs:
-        buildType: 'current'
-        artifactName: 'todoapi_artifact'
-        targetPath: '$(Pipeline.Workspace)/todoapi_artifact'
-
-    # --------------------------------------------------------
-    # Create ZIP
+    # 4. Create ZIP
     # --------------------------------------------------------
     - task: ArchiveFiles@2
       displayName: Create Application ZIP
@@ -78,6 +63,37 @@ stages:
         archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
         replaceExistingArchive: true
 
+    # --------------------------------------------------------
+    # 5. Verify ZIP
+    # --------------------------------------------------------
+    - task: PowerShell@2
+      displayName: Verify Application ZIP
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Artifact staging directory:"
+          Get-ChildItem "$(Build.ArtifactStagingDirectory)"
+
+          Write-Host "Checking artifact.zip..."
+          if (Test-Path "$(Build.ArtifactStagingDirectory)/artifact.zip") {
+              Write-Host "artifact.zip found successfully."
+          }
+          else {
+              Write-Error "artifact.zip was not created."
+              exit 1
+          }
+
+    # --------------------------------------------------------
+    # 6. Publish ZIP Artifact
+    # --------------------------------------------------------
+    - task: PublishPipelineArtifact@1
+      displayName: Publish Application Artifact
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/artifact.zip'
+        artifact: 'todoapi_package'
+        publishLocation: 'pipeline'
+
+
 # ============================================================
 # DEPLOY STAGE
 # ============================================================
@@ -85,11 +101,11 @@ stages:
   displayName: Deploy Application to VM
 
   dependsOn: Build
+  condition: succeeded()
 
   jobs:
 
   - deployment: deployPy
-
     displayName: Deploy Python Backend
 
     environment:
@@ -102,7 +118,7 @@ stages:
           steps:
 
           # --------------------------------------------------
-          # Download artifact on VM
+          # 1. Download Build Artifact
           # --------------------------------------------------
           - task: DownloadPipelineArtifact@2
             displayName: Download Build Artifact
@@ -111,9 +127,8 @@ stages:
               artifactName: 'todoapi_package'
               targetPath: '$(Pipeline.Workspace)/todoapi_package'
 
-
           # --------------------------------------------------
-          # Deploy application
+          # 2. Deploy Application
           # --------------------------------------------------
           - task: Bash@3
             displayName: Stop Service, Deploy Code & Restart
@@ -121,30 +136,57 @@ stages:
               targetType: 'inline'
               script: |
 
-                echo "================================="
-                echo "     PYTHON BACKEND DEPLOY"
-                echo "================================="
+                set -e
 
-                echo "Stopping service..."
+                echo "========================================"
+                echo "       PYTHON BACKEND DEPLOYMENT"
+                echo "========================================"
+
+                echo ""
+                echo "===== ARTIFACT CHECK ====="
+
+                ls -lah "$(Pipeline.Workspace)/todoapi_package"
+
+                test -f "$(Pipeline.Workspace)/todoapi_package/artifact.zip"
+
+                echo ""
+                echo "===== STOP APPLICATION ====="
+
                 sudo systemctl stop $(SERVICE_NAME) || true
 
+                echo ""
+                echo "===== CREATE APPLICATION DIRECTORY ====="
 
-                echo "Creating application directory..."
-                sudo mkdir -p $(APP_DIR)
+                sudo mkdir -p "$(APP_DIR)"
 
+                echo ""
+                echo "===== CLEAN OLD APPLICATION ====="
 
-                echo "Extracting application..."
+                sudo find "$(APP_DIR)" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+                echo ""
+                echo "===== EXTRACT NEW APPLICATION ====="
+
                 sudo unzip -o \
                   "$(Pipeline.Workspace)/todoapi_package/artifact.zip" \
                   -d "$(APP_DIR)"
 
+                echo ""
+                echo "===== VERIFY APPLICATION FILE ====="
 
-                echo "Setting ownership..."
-                sudo chown -R $(whoami):$(whoami) $(APP_DIR)
+                ls -lah "$(APP_DIR)"
 
+                test -f "$(APP_DIR)/app.py"
 
-                echo "Creating systemd service..."
-                sudo tee /etc/systemd/system/$(SERVICE_NAME).service > /dev/null <<EOF
+                echo ""
+                echo "===== SET OWNERSHIP ====="
+
+                sudo chown -R $(whoami):$(whoami) "$(APP_DIR)"
+
+                echo ""
+                echo "===== CREATE SYSTEMD SERVICE ====="
+
+                sudo tee "/etc/systemd/system/$(SERVICE_NAME).service" > /dev/null <<EOF
                 [Unit]
                 Description=Todo API Uvicorn App
                 After=network.target
@@ -160,29 +202,35 @@ stages:
                 WantedBy=multi-user.target
                 EOF
 
+                echo ""
+                echo "===== RELOAD SYSTEMD ====="
 
-                echo "Reloading systemd..."
                 sudo systemctl daemon-reload
 
+                echo ""
+                echo "===== ENABLE SERVICE ====="
 
-                echo "Enabling service..."
                 sudo systemctl enable $(SERVICE_NAME)
 
+                echo ""
+                echo "===== START SERVICE ====="
 
-                echo "Starting service..."
                 sudo systemctl start $(SERVICE_NAME)
 
+                echo ""
+                echo "===== SERVICE STATUS ====="
 
-                echo "Checking service status..."
                 sudo systemctl --no-pager status $(SERVICE_NAME)
 
+                echo ""
+                echo "===== APPLICATION HEALTH CHECK ====="
 
-                echo "Checking application..."
-                curl -f http://localhost:8000/api || exit 1
+                curl -f http://localhost:8000/api
 
+                echo ""
+                echo "========================================"
+                echo "      DEPLOYMENT SUCCESSFUL"
+                echo "========================================"
 
-                echo "================================="
-                echo "     DEPLOYMENT SUCCESSFUL"
-                echo "================================="
 
 
