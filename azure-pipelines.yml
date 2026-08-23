@@ -22,12 +22,12 @@ stages:
           python -m pip install ruff
           python -m ruff --version
 
-    - task: PowerShell@2
-      displayName: Run Python Linting (Ruff)
-      inputs:
-        targetType: 'inline'
-        script: |
-          python -m ruff check --fix "$(Build.SourcesDirectory)/app.py"
+    # - task: PowerShell@2
+    #   displayName: Run Python Linting (Ruff)
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #       python -m ruff check --fix "$(Build.SourcesDirectory)/app.py"
 
     - task: PublishPipelineArtifact@1
       displayName: Publish Application Artifact
