@@ -47,17 +47,7 @@ stages:
     #     script: |
     #       python -m ruff check "$(Build.SourcesDirectory)/app.py"
 
-    # --------------------------------------------------------
-    # Create ZIP
-    # --------------------------------------------------------
-    - task: ArchiveFiles@2
-      displayName: Create Application ZIP
-      inputs:
-        rootFolderOrFile: '$(Build.SourcesDirectory)/app.py'
-        includeRootFolder: false
-        archiveType: 'zip'
-        archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
-        replaceExistingArchive: true
+
 
     # --------------------------------------------------------
     # Publish ZIP Artifact
@@ -69,6 +59,24 @@ stages:
         artifact: 'todoapi_package'
         publishLocation: 'pipeline'
 
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: 'todoapi_artifact'
+        targetPath: '$(Pipeline.Workspace)/todoapi_artifact'
+
+    # --------------------------------------------------------
+    # Create ZIP
+    # --------------------------------------------------------
+    - task: ArchiveFiles@2
+      displayName: Create Application ZIP
+      inputs:
+        rootFolderOrFile: '$(Build.SourcesDirectory)/app.py'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
+        replaceExistingArchive: true
 
 # ============================================================
 # DEPLOY STAGE
