@@ -7,7 +7,6 @@ variables:
   APP_DIR: '/home/azureuser/todoapi'
   VENV_DIR: '/home/azureuser/PyTodoBackendMonolith/venv'
   SERVICE_NAME: 'pytodo'
-  ARTIFACT_NAME: 'todoapi_package'
 
 stages:
 
@@ -30,97 +29,46 @@ stages:
     # --------------------------------------------------------
 
     - checkout: self
-      displayName: Checkout GitHub Repository
 
 
     # --------------------------------------------------------
-    # Check Python
+    # Python + Ruff
     # --------------------------------------------------------
 
     - task: PowerShell@2
-      displayName: Check Python Version
+      displayName: Check Python Version & Install Ruff
       inputs:
         targetType: 'inline'
         script: |
           python --version
-          python -m pip --version
-
-
-    # --------------------------------------------------------
-    # Install Ruff
-    # --------------------------------------------------------
-
-    - task: PowerShell@2
-      displayName: Install Ruff
-      inputs:
-        targetType: 'inline'
-        script: |
           python -m pip install --upgrade pip
           python -m pip install ruff
           python -m ruff --version
 
 
     # --------------------------------------------------------
-    # Ruff Code Quality Check
-    # --------------------------------------------------------
-
-    # - task: PowerShell@2
-    #   displayName: Run Python Linting
-    #   inputs:
-    #     targetType: 'inline'
-    #     script: |
-    #       python -m ruff check "$(Build.SourcesDirectory)/app.py"
-
-
-    # --------------------------------------------------------
-    # Verify Required Files
-    # --------------------------------------------------------
-
-    - task: PowerShell@2
-      displayName: Verify Application Files
-      inputs:
-        targetType: 'inline'
-        script: |
-          Write-Host "Checking application files..."
-
-          if (!(Test-Path "$(Build.SourcesDirectory)/app.py")) {
-              Write-Error "app.py not found"
-              exit 1
-          }
-
-          if (!(Test-Path "$(Build.SourcesDirectory)/requirements.txt")) {
-              Write-Error "requirements.txt not found"
-              exit 1
-          }
-
-          Write-Host "Required files found."
-          Get-ChildItem "$(Build.SourcesDirectory)"
-
-
-    # --------------------------------------------------------
-    # Create Application ZIP
+    # Create ZIP Artifact
     # --------------------------------------------------------
 
     - task: ArchiveFiles@2
       displayName: Create Application ZIP
       inputs:
-        rootFolderOrFile: '$(Build.SourcesDirectory)'
+        rootFolderOrFile: '$(Build.SourcesDirectory)/app.py'
         includeRootFolder: false
         archiveType: 'zip'
         archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
         replaceExistingArchive: true
-        verbose: true
 
 
     # --------------------------------------------------------
-    # Publish Pipeline Artifact
+    # Publish Artifact
     # --------------------------------------------------------
 
     - task: PublishPipelineArtifact@1
       displayName: Publish Application Artifact
       inputs:
         targetPath: '$(Build.ArtifactStagingDirectory)/artifact.zip'
-        artifact: '$(ARTIFACT_NAME)'
+        artifact: 'todoapi_package'
         publishLocation: 'pipeline'
 
 
@@ -131,9 +79,8 @@ stages:
 - stage: Deploy
   displayName: Deploy Application to VM
 
-  dependsOn: Build
-
-  condition: succeeded()
+  dependsOn:
+  - Build
 
   jobs:
 
@@ -151,15 +98,15 @@ stages:
           steps:
 
           # --------------------------------------------------
-          # Download Build Artifact
+          # Download Artifact
           # --------------------------------------------------
 
           - task: DownloadPipelineArtifact@2
             displayName: Download Build Artifact
             inputs:
               buildType: 'current'
-              artifactName: '$(ARTIFACT_NAME)'
-              targetPath: '$(Pipeline.Workspace)/$(ARTIFACT_NAME)'
+              artifactName: 'todoapi_package'
+              targetPath: '$(Pipeline.Workspace)/todoapi_package'
 
 
           # --------------------------------------------------
@@ -167,263 +114,48 @@ stages:
           # --------------------------------------------------
 
           - task: Bash@3
-            displayName: Deploy Python Backend
+            displayName: Stop Service, Deploy Code & Restart
             inputs:
               targetType: 'inline'
               script: |
 
-                set -e
+                echo "================================="
+                echo "     PYTHON BACKEND DEPLOY"
+                echo "================================="
 
-                echo "=============================================="
-                echo "        PYTHON BACKEND DEPLOYMENT"
-                echo "=============================================="
-
-                echo ""
-                echo "Deployment started..."
-                echo "Application Directory: $(APP_DIR)"
-                echo "Virtual Environment: $(VENV_DIR)"
-                echo "Service Name: $(SERVICE_NAME)"
-
-
-                # ==================================================
-                # CHECK OPERATING SYSTEM
-                # ==================================================
-
-                echo ""
-                echo "Checking operating system..."
-
-                cat /etc/os-release || true
-
-
-                # ==================================================
-                # INSTALL REQUIRED SYSTEM PACKAGES
-                # ==================================================
-
-                echo ""
-                echo "Checking unzip..."
-
-                if ! command -v unzip >/dev/null 2>&1; then
-
-                  echo "unzip not found."
-                  echo "Installing unzip..."
-
-                  sudo apt-get update
-                  sudo apt-get install -y unzip
-
-                else
-
-                  echo "unzip is already installed."
-
-                fi
-
-
-                # ==================================================
-                # VERIFY ZIP FILE
-                # ==================================================
-
-                echo ""
-                echo "Checking downloaded artifact..."
-
-                ARTIFACT_PATH="$(Pipeline.Workspace)/$(ARTIFACT_NAME)/artifact.zip"
-
-                if [ ! -f "$ARTIFACT_PATH" ]; then
-
-                  echo "ERROR: Artifact not found:"
-                  echo "$ARTIFACT_PATH"
-
-                  exit 1
-
-                fi
-
-                echo "Artifact found:"
-                ls -lh "$ARTIFACT_PATH"
-
-
-                # ==================================================
-                # STOP CURRENT SERVICE
-                # ==================================================
-
-                echo ""
-                echo "Stopping existing service..."
+                echo "Stopping service..."
 
                 sudo systemctl stop $(SERVICE_NAME) || true
 
 
-                # ==================================================
-                # CREATE APPLICATION DIRECTORY
-                # ==================================================
-
-                echo ""
                 echo "Creating application directory..."
 
-                sudo mkdir -p "$(APP_DIR)"
+                sudo mkdir -p $(APP_DIR)
 
 
-                # ==================================================
-                # BACKUP CURRENT APPLICATION
-                # ==================================================
-
-                echo ""
-                echo "Creating deployment backup..."
-
-                if [ -f "$(APP_DIR)/app.py" ]; then
-
-                  sudo mkdir -p "$(APP_DIR)/backup"
-
-                  sudo cp "$(APP_DIR)/app.py" \
-                    "$(APP_DIR)/backup/app.py.backup" || true
-
-                fi
-
-
-                # ==================================================
-                # CLEAN OLD APPLICATION FILES
-                # ==================================================
-
-                echo ""
-                echo "Cleaning old application files..."
-
-                sudo find "$(APP_DIR)" \
-                  -maxdepth 1 \
-                  -type f \
-                  -delete
-
-
-                # ==================================================
-                # EXTRACT APPLICATION
-                # ==================================================
-
-                echo ""
                 echo "Extracting application..."
 
                 sudo unzip -o \
-                  "$ARTIFACT_PATH" \
+                  "$(Pipeline.Workspace)/todoapi_package/artifact.zip" \
                   -d "$(APP_DIR)"
 
 
-                # ==================================================
-                # SET OWNERSHIP
-                # ==================================================
+                echo "Setting ownership..."
 
-                echo ""
-                echo "Setting application ownership..."
-
-                sudo chown -R "$(whoami):$(whoami)" "$(APP_DIR)"
+                sudo chown -R $(whoami):$(whoami) $(APP_DIR)
 
 
-                # ==================================================
-                # VERIFY APPLICATION FILES
-                # ==================================================
-
-                echo ""
-                echo "Application files:"
-
-                ls -la "$(APP_DIR)"
-
-
-                echo ""
-                echo "Checking app.py..."
-
-                if [ ! -f "$(APP_DIR)/app.py" ]; then
-
-                  echo "ERROR: app.py was not found after extraction."
-
-                  exit 1
-
-                fi
-
-
-                echo ""
-                echo "Checking requirements.txt..."
-
-                if [ ! -f "$(APP_DIR)/requirements.txt" ]; then
-
-                  echo "ERROR: requirements.txt was not found."
-
-                  exit 1
-
-                fi
-
-
-                # ==================================================
-                # CHECK VIRTUAL ENVIRONMENT
-                # ==================================================
-
-                echo ""
-                echo "Checking Python virtual environment..."
-
-                if [ ! -d "$(VENV_DIR)" ]; then
-
-                  echo "ERROR: Virtual environment not found:"
-                  echo "$(VENV_DIR)"
-
-                  exit 1
-
-                fi
-
-
-                if [ ! -f "$(VENV_DIR)/bin/python" ]; then
-
-                  echo "ERROR: Python executable not found:"
-                  echo "$(VENV_DIR)/bin/python"
-
-                  exit 1
-
-                fi
-
-
-                # ==================================================
-                # INSTALL PYTHON DEPENDENCIES
-                # ==================================================
-
-                echo ""
-                echo "Installing Python dependencies..."
-
-                "$(VENV_DIR)/bin/python" -m pip install --upgrade pip
-
-                "$(VENV_DIR)/bin/python" -m pip install \
-                  -r "$(APP_DIR)/requirements.txt"
-
-
-                # ==================================================
-                # VERIFY UVICORN
-                # ==================================================
-
-                echo ""
-                echo "Checking Uvicorn..."
-
-                if [ ! -f "$(VENV_DIR)/bin/uvicorn" ]; then
-
-                  echo "Uvicorn not found."
-                  echo "Installing Uvicorn..."
-
-                  "$(VENV_DIR)/bin/python" -m pip install uvicorn
-
-                fi
-
-
-                # ==================================================
-                # CREATE SYSTEMD SERVICE
-                # ==================================================
-
-                echo ""
                 echo "Creating systemd service..."
 
-                sudo tee "/etc/systemd/system/$(SERVICE_NAME).service" > /dev/null <<EOF
+                sudo tee /etc/systemd/system/$(SERVICE_NAME).service > /dev/null <<EOF
                 [Unit]
-                Description=Todo API Uvicorn Application
+                Description=Todo API Uvicorn App
                 After=network.target
 
                 [Service]
-                Type=simple
                 User=$(whoami)
-                Group=$(whoami)
                 WorkingDirectory=$(APP_DIR)
-
-                Environment="PYTHONUNBUFFERED=1"
-
                 ExecStart=$(VENV_DIR)/bin/uvicorn app:app --host 0.0.0.0 --port 8000
-
                 Restart=always
                 RestartSec=5
 
@@ -432,141 +164,31 @@ stages:
                 EOF
 
 
-                # ==================================================
-                # RELOAD SYSTEMD
-                # ==================================================
-
-                echo ""
                 echo "Reloading systemd..."
 
                 sudo systemctl daemon-reload
 
 
-                # ==================================================
-                # ENABLE SERVICE
-                # ==================================================
-
-                echo ""
                 echo "Enabling service..."
 
                 sudo systemctl enable $(SERVICE_NAME)
 
 
-                # ==================================================
-                # START SERVICE
-                # ==================================================
-
-                echo ""
                 echo "Starting service..."
 
                 sudo systemctl start $(SERVICE_NAME)
 
 
-                # ==================================================
-                # WAIT FOR APPLICATION
-                # ==================================================
+                echo "Checking service status..."
 
-                echo ""
-                echo "Waiting for application to start..."
-
-                sleep 5
+                sudo systemctl --no-pager status $(SERVICE_NAME)
 
 
-                # ==================================================
-                # CHECK SERVICE STATUS
-                # ==================================================
+                echo "Checking application..."
 
-                echo ""
-                echo "=============================================="
-                echo "          SYSTEMD SERVICE STATUS"
-                echo "=============================================="
-
-                sudo systemctl --no-pager --full status $(SERVICE_NAME)
+                curl -f http://localhost:8000/api || exit 1
 
 
-                # ==================================================
-                # CHECK SERVICE IS ACTIVE
-                # ==================================================
-
-                echo ""
-                echo "Checking service state..."
-
-                if ! sudo systemctl is-active --quiet $(SERVICE_NAME); then
-
-                  echo ""
-                  echo "ERROR: Service is not running."
-
-                  echo ""
-                  echo "Recent application logs:"
-
-                  sudo journalctl \
-                    -u $(SERVICE_NAME) \
-                    -n 100 \
-                    --no-pager
-
-                  exit 1
-
-                fi
-
-
-                # ==================================================
-                # APPLICATION HEALTH CHECK
-                # ==================================================
-
-                echo ""
-                echo "=============================================="
-                echo "          APPLICATION HEALTH CHECK"
-                echo "=============================================="
-
-                echo ""
-                echo "Checking:"
-                echo "http://localhost:8000/api"
-
-
-                if curl \
-                  --fail \
-                  --silent \
-                  --show-error \
-                  --max-time 10 \
-                  http://localhost:8000/api; then
-
-                  echo ""
-                  echo ""
-                  echo "Application health check successful."
-
-                else
-
-                  echo ""
-                  echo "ERROR: Application health check failed."
-
-                  echo ""
-                  echo "Application logs:"
-
-                  sudo journalctl \
-                    -u $(SERVICE_NAME) \
-                    -n 100 \
-                    --no-pager
-
-                  exit 1
-
-                fi
-
-
-                # ==================================================
-                # FINAL STATUS
-                # ==================================================
-
-                echo ""
-                echo "=============================================="
-                echo "       DEPLOYMENT SUCCESSFUL"
-                echo "=============================================="
-
-                echo ""
-                echo "Application : Todo API"
-                echo "Directory   : $(APP_DIR)"
-                echo "Service     : $(SERVICE_NAME)"
-                echo "Port        : 8000"
-                echo "Status      : RUNNING"
-
-                echo ""
-                echo "=============================================="
+                echo "================================="
+                echo "     DEPLOYMENT SUCCESSFUL"
+                echo "================================="
