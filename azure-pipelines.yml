@@ -119,11 +119,13 @@ stages:
               targetType: 'inline'
               script: |
 
+                set -e
+
                 echo "================================="
                 echo "     PYTHON BACKEND DEPLOY"
                 echo "================================="
 
-                echo "Stopping service..."
+                echo "Stopping old service..."
 
                 sudo systemctl stop $(SERVICE_NAME) || true
 
@@ -133,6 +135,11 @@ stages:
                 sudo mkdir -p $(APP_DIR)
 
 
+                echo "Cleaning old application files..."
+
+                sudo rm -rf $(APP_DIR)/*
+
+
                 echo "Extracting application..."
 
                 sudo unzip -o \
@@ -140,9 +147,26 @@ stages:
                   -d "$(APP_DIR)"
 
 
+                echo "Checking deployed files..."
+
+                ls -la "$(APP_DIR)"
+
+
                 echo "Setting ownership..."
 
-                sudo chown -R $(whoami):$(whoami) $(APP_DIR)
+                sudo chown -R $(whoami):$(whoami) "$(APP_DIR)"
+
+
+                echo "Checking Python dependencies..."
+
+                "$(VENV_DIR)/bin/python" -c "import fastapi, uvicorn, pyodbc"
+
+
+                echo "Testing application import..."
+
+                cd "$(APP_DIR)"
+
+                "$(VENV_DIR)/bin/python" -c "import app; print('APP IMPORT: SUCCESS')"
 
 
                 echo "Creating systemd service..."
@@ -150,14 +174,23 @@ stages:
                 sudo tee /etc/systemd/system/$(SERVICE_NAME).service > /dev/null <<EOF
                 [Unit]
                 Description=Todo API Uvicorn App
-                After=network.target
+                After=network-online.target
+                Wants=network-online.target
 
                 [Service]
+                Type=simple
                 User=$(whoami)
                 WorkingDirectory=$(APP_DIR)
-                ExecStart=$(VENV_DIR)/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+
+                Environment="PYTHONUNBUFFERED=1"
+
+                ExecStart=$(VENV_DIR)/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8000
+
                 Restart=always
                 RestartSec=5
+
+                StandardOutput=journal
+                StandardError=journal
 
                 [Install]
                 WantedBy=multi-user.target
@@ -179,16 +212,46 @@ stages:
                 sudo systemctl start $(SERVICE_NAME)
 
 
-                echo "Checking service status..."
+                echo "Waiting for application startup..."
 
-                sudo systemctl --no-pager status $(SERVICE_NAME)
+                for i in {1..15}
+                do
+                  echo "Health check attempt $i/15..."
 
+                  if curl -fsS http://127.0.0.1:8000/api > /tmp/todoapi_health.txt
+                  then
+                    echo "================================="
+                    echo "     API IS UP"
+                    echo "================================="
 
-                echo "Checking application..."
+                    cat /tmp/todoapi_health.txt
 
-                curl -f http://localhost:8000/api || exit 1
+                    echo ""
+                    echo "Deployment successful!"
+
+                    exit 0
+                  fi
+
+                  echo "API not ready yet..."
+
+                  sleep 2
+                done
 
 
                 echo "================================="
-                echo "     DEPLOYMENT SUCCESSFUL"
+                echo "     DEPLOYMENT FAILED"
                 echo "================================="
+
+                echo ""
+                echo "SERVICE STATUS:"
+                sudo systemctl status $(SERVICE_NAME) --no-pager || true
+
+                echo ""
+                echo "SERVICE LOGS:"
+                sudo journalctl -u $(SERVICE_NAME) -n 100 --no-pager || true
+
+                echo ""
+                echo "APPLICATION FILES:"
+                ls -la "$(APP_DIR)" || true
+
+                exit 1
