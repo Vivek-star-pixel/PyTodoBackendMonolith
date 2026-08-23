@@ -1,8 +1,3 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger: none
 
 pool: Default
@@ -32,34 +27,18 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          python -m ruff check --fix "$(Build.SourcesDirectory)/PyTodoBackendMonolith/app.py"
+          python -m ruff check --fix "$(Build.SourcesDirectory)/app.py"
 
     - task: PublishPipelineArtifact@1
       displayName: Publish Application Artifact
       inputs:
-        targetPath: '$(System.DefaultWorkingDirectory)/app.py'
+        targetPath: '$(Build.SourcesDirectory)/app.py'
         artifact: 'vivek-todo'
         publishLocation: 'pipeline'
 
     - task: DownloadPipelineArtifact@2
+      displayName: Download Application Artifact
       inputs:
         buildType: 'current'
         artifactName: 'vivek-todo'
         targetPath: '$(Pipeline.Workspace)/vivek-todo'
-
-
-    # - task: ArchiveFiles@2
-    #   inputs:
-    #     rootFolderOrFile: '$(Pipeline.Workspace)/todoapi_artifact'
-    #     includeRootFolder: true
-    #     archiveType: 'zip'
-    #     archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
-    #     replaceExistingArchive: true
-
-
-
-
-
-
-
-
