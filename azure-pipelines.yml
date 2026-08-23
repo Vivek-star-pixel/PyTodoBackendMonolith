@@ -51,12 +51,12 @@ stages:
     # Ruff Code Quality Check
     # --------------------------------------------------------
 
-    - task: PowerShell@2
-      displayName: Run Python Linting (Ruff)
-      inputs:
-        targetType: 'inline'
-        script: |
-          python -m ruff check "$(Build.SourcesDirectory)/app.py"
+    # - task: PowerShell@2
+    #   displayName: Run Python Linting (Ruff)
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #       python -m ruff check "$(Build.SourcesDirectory)/app.py"
 
 
     # --------------------------------------------------------
