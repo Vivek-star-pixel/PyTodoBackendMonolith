@@ -1,6 +1,7 @@
 trigger: none
 
-pool: Default
+pool:
+  name: Default
 
 variables:
   APP_DIR: '/home/azureuser/todoapi'
@@ -12,23 +13,29 @@ stages:
 # ============================================================
 # BUILD STAGE
 # ============================================================
+
 - stage: Build
   displayName: Build & Code Quality
 
   jobs:
+
   - job: BuildPythonApp
     displayName: Build Python Application
 
     steps:
 
     # --------------------------------------------------------
-    # 1. Checkout GitHub Repository
+    # Checkout Repository
     # --------------------------------------------------------
+
     - checkout: self
+      displayName: Checkout GitHub Repository
+
 
     # --------------------------------------------------------
-    # 2. Install / Verify Python + Ruff
+    # Python + Ruff
     # --------------------------------------------------------
+
     - task: PowerShell@2
       displayName: Check Python Version & Install Ruff
       inputs:
@@ -39,21 +46,23 @@ stages:
           python -m pip install ruff
           python -m ruff --version
 
-    # --------------------------------------------------------
-    # 3. Ruff Linting
-    # --------------------------------------------------------
-    # Enable this after fixing all Ruff issues in app.py
-    # --------------------------------------------------------
-    # - task: PowerShell@2
-    #   displayName: Run Python Linting (Ruff)
-    #   inputs:
-    #     targetType: 'inline'
-    #     script: |
-    #       python -m ruff check "$(Build.SourcesDirectory)/app.py"
 
     # --------------------------------------------------------
-    # 4. Create ZIP
+    # Ruff Code Quality Check
     # --------------------------------------------------------
+
+    - task: PowerShell@2
+      displayName: Run Python Linting (Ruff)
+      inputs:
+        targetType: 'inline'
+        script: |
+          python -m ruff check "$(Build.SourcesDirectory)/app.py"
+
+
+    # --------------------------------------------------------
+    # Create ZIP Artifact
+    # --------------------------------------------------------
+
     - task: ArchiveFiles@2
       displayName: Create Application ZIP
       inputs:
@@ -63,29 +72,11 @@ stages:
         archiveFile: '$(Build.ArtifactStagingDirectory)/artifact.zip'
         replaceExistingArchive: true
 
-    # --------------------------------------------------------
-    # 5. Verify ZIP
-    # --------------------------------------------------------
-    - task: PowerShell@2
-      displayName: Verify Application ZIP
-      inputs:
-        targetType: 'inline'
-        script: |
-          Write-Host "Artifact staging directory:"
-          Get-ChildItem "$(Build.ArtifactStagingDirectory)"
-
-          Write-Host "Checking artifact.zip..."
-          if (Test-Path "$(Build.ArtifactStagingDirectory)/artifact.zip") {
-              Write-Host "artifact.zip found successfully."
-          }
-          else {
-              Write-Error "artifact.zip was not created."
-              exit 1
-          }
 
     # --------------------------------------------------------
-    # 6. Publish ZIP Artifact
+    # Publish Pipeline Artifact
     # --------------------------------------------------------
+
     - task: PublishPipelineArtifact@1
       displayName: Publish Application Artifact
       inputs:
@@ -97,10 +88,12 @@ stages:
 # ============================================================
 # DEPLOY STAGE
 # ============================================================
+
 - stage: Deploy
   displayName: Deploy Application to VM
 
   dependsOn: Build
+
   condition: succeeded()
 
   jobs:
@@ -115,11 +108,13 @@ stages:
     strategy:
       runOnce:
         deploy:
+
           steps:
 
           # --------------------------------------------------
-          # 1. Download Build Artifact
+          # Download Artifact on VM
           # --------------------------------------------------
+
           - task: DownloadPipelineArtifact@2
             displayName: Download Build Artifact
             inputs:
@@ -127,9 +122,11 @@ stages:
               artifactName: 'todoapi_package'
               targetPath: '$(Pipeline.Workspace)/todoapi_package'
 
+
           # --------------------------------------------------
-          # 2. Deploy Application
+          # Deploy Application
           # --------------------------------------------------
+
           - task: Bash@3
             displayName: Stop Service, Deploy Code & Restart
             inputs:
@@ -138,55 +135,36 @@ stages:
 
                 set -e
 
-                echo "========================================"
-                echo "       PYTHON BACKEND DEPLOYMENT"
-                echo "========================================"
+                echo "================================="
+                echo "     PYTHON BACKEND DEPLOY"
+                echo "================================="
 
                 echo ""
-                echo "===== ARTIFACT CHECK ====="
-
-                ls -lah "$(Pipeline.Workspace)/todoapi_package"
-
-                test -f "$(Pipeline.Workspace)/todoapi_package/artifact.zip"
-
-                echo ""
-                echo "===== STOP APPLICATION ====="
-
+                echo "Stopping service..."
                 sudo systemctl stop $(SERVICE_NAME) || true
 
-                echo ""
-                echo "===== CREATE APPLICATION DIRECTORY ====="
-
-                sudo mkdir -p "$(APP_DIR)"
 
                 echo ""
-                echo "===== CLEAN OLD APPLICATION ====="
+                echo "Creating application directory..."
+                sudo mkdir -p $(APP_DIR)
 
-                sudo find "$(APP_DIR)" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
                 echo ""
-                echo "===== EXTRACT NEW APPLICATION ====="
-
+                echo "Extracting application..."
                 sudo unzip -o \
                   "$(Pipeline.Workspace)/todoapi_package/artifact.zip" \
                   -d "$(APP_DIR)"
 
-                echo ""
-                echo "===== VERIFY APPLICATION FILE ====="
-
-                ls -lah "$(APP_DIR)"
-
-                test -f "$(APP_DIR)/app.py"
 
                 echo ""
-                echo "===== SET OWNERSHIP ====="
+                echo "Setting ownership..."
+                sudo chown -R $(whoami):$(whoami) $(APP_DIR)
 
-                sudo chown -R $(whoami):$(whoami) "$(APP_DIR)"
 
                 echo ""
-                echo "===== CREATE SYSTEMD SERVICE ====="
+                echo "Creating systemd service..."
 
-                sudo tee "/etc/systemd/system/$(SERVICE_NAME).service" > /dev/null <<EOF
+                sudo tee /etc/systemd/system/$(SERVICE_NAME).service > /dev/null <<EOF
                 [Unit]
                 Description=Todo API Uvicorn App
                 After=network.target
@@ -202,35 +180,36 @@ stages:
                 WantedBy=multi-user.target
                 EOF
 
-                echo ""
-                echo "===== RELOAD SYSTEMD ====="
 
+                echo ""
+                echo "Reloading systemd..."
                 sudo systemctl daemon-reload
 
-                echo ""
-                echo "===== ENABLE SERVICE ====="
 
+                echo ""
+                echo "Enabling service..."
                 sudo systemctl enable $(SERVICE_NAME)
 
-                echo ""
-                echo "===== START SERVICE ====="
 
+                echo ""
+                echo "Starting service..."
                 sudo systemctl start $(SERVICE_NAME)
 
-                echo ""
-                echo "===== SERVICE STATUS ====="
 
+                echo ""
+                echo "Checking service status..."
                 sudo systemctl --no-pager status $(SERVICE_NAME)
 
-                echo ""
-                echo "===== APPLICATION HEALTH CHECK ====="
-
-                curl -f http://localhost:8000/api
 
                 echo ""
-                echo "========================================"
-                echo "      DEPLOYMENT SUCCESSFUL"
-                echo "========================================"
+                echo "Checking application..."
+
+                sleep 3
+
+                curl -f http://localhost:8000/api || exit 1
 
 
-
+                echo ""
+                echo "================================="
+                echo "     DEPLOYMENT SUCCESSFUL"
+                echo "================================="
