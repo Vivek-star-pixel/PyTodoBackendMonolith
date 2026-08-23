@@ -85,7 +85,7 @@ stages:
     displayName: Deploy Python Backend
 
     environment:
-      name: python
+      name: vivek-ENV
       resourceType: virtualMachine
 
     strategy:
